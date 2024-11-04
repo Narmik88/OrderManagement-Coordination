@@ -97,17 +97,26 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
 
   const handleCompleteTask = async (orderId: string, taskId: string) => {
     try {
-      setLocalOrders(prev => prev.map(order => {
-        if (order.id === orderId) {
-          const updatedTasks = order.tasks.map(task => 
-            task.id === taskId 
-              ? { ...task, completed: !task.completed, completedAt: !task.completed ? new Date().toISOString() : undefined }
-              : task
-          );
-          return { ...order, tasks: updatedTasks };
-        }
-        return order;
-      }));
+      const order = localOrders.find(o => o.id === orderId);
+      if (!order) return;
+
+      const updatedOrder = {
+        ...order,
+        tasks: order.tasks.map(task => 
+          task.id === taskId 
+            ? { ...task, completed: !task.completed, completedAt: !task.completed ? new Date().toISOString() : undefined }
+            : task
+        )
+      };
+
+      const allTasksCompleted = updatedOrder.tasks.every(task => task.completed);
+      if (allTasksCompleted && updatedOrder.status !== 'completed') {
+        updatedOrder.status = 'completed';
+        updatedOrder.completedAt = new Date().toISOString();
+      }
+
+      setLocalOrders(prev => prev.map(o => o.id === orderId ? updatedOrder : o));
+      await orderService.updateOrder(updatedOrder);
       onCompleteTask?.(orderId, taskId);
     } catch (error) {
       console.error('Failed to complete task:', error);
@@ -124,25 +133,6 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
       onUpdateDetails?.(orderId, details);
     } catch (error) {
       console.error('Failed to update details:', error);
-    }
-  };
-
-  const getTimeInMilliseconds = (timeFrame: string): number => {
-    const now = new Date().getTime();
-    switch (timeFrame) {
-      case '1h': return 60 * 60 * 1000;
-      case '12h': return 12 * 60 * 60 * 1000;
-      case '24h': return 24 * 60 * 60 * 1000;
-      case '3d': return 3 * 24 * 60 * 60 * 1000;
-      case '7d': return 7 * 24 * 60 * 60 * 1000;
-      case '15d': return 15 * 24 * 60 * 60 * 1000;
-      case '30d': return 30 * 24 * 60 * 60 * 1000;
-      case '45d': return 45 * 24 * 60 * 60 * 1000;
-      case '60d': return 60 * 24 * 60 * 60 * 1000;
-      case '6m': return 180 * 24 * 60 * 60 * 1000;
-      case '12m': return 365 * 24 * 60 * 60 * 1000;
-      case '24m': return 730 * 24 * 60 * 60 * 1000;
-      default: return Infinity;
     }
   };
 
@@ -169,20 +159,6 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
 
       if (filters.assignedTo && order.assignedTo !== filters.assignedTo) {
         return false;
-      }
-
-      if (filters.createdWithin !== 'all') {
-        const timeLimit = getTimeInMilliseconds(filters.createdWithin);
-        const orderTime = new Date(order.createdAt).getTime();
-        const now = new Date().getTime();
-        if (now - orderTime > timeLimit) return false;
-      }
-
-      if (filters.closedAfter && order.completedAt) {
-        const timeLimit = getTimeInMilliseconds(filters.closedAfter);
-        const createdTime = new Date(order.createdAt).getTime();
-        const completedTime = new Date(order.completedAt).getTime();
-        if (completedTime - createdTime > timeLimit) return false;
       }
 
       if (!filters.status.unassigned && order.status === 'unassigned') return false;

@@ -17,7 +17,7 @@ const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Date';
+    if (isNaN(date.getTime())) return 'N/A';
     return new Intl.DateTimeFormat('en-US', {
       year: 'numeric',
       month: 'short',
@@ -27,7 +27,7 @@ const formatDate = (dateString: string | undefined): string => {
     }).format(date);
   } catch (error) {
     console.error('Date formatting error:', error);
-    return 'Invalid Date';
+    return 'N/A';
   }
 };
 
@@ -241,9 +241,9 @@ export const OrderCard: React.FC<Props> = ({
             )}
           </button>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-2">
+        <div className="w-full bg-gray-200 rounded-full h-1.5">
           <div
-            className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+            className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
             style={{ width: `${completionPercentage}%` }}
           />
         </div>
@@ -272,7 +272,7 @@ export const OrderCard: React.FC<Props> = ({
         </div>
       )}
 
-      <div className="mt-4 text-sm text-gray-500">
+      <div className="mt-4 text-sm text-gray-500 space-y-1">
         <p>Created: {formatDate(order.createdAt)}</p>
         {order.completedAt && (
           <p>Completed: {formatDate(order.completedAt)}</p>
