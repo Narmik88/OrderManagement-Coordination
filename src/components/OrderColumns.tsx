@@ -1,15 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { Order } from '../types';
-import { Clock, Loader, CheckCircle2, User, Search, SortAsc, SortDesc, Eye, EyeOff } from 'lucide-react';
+import { Clock, Loader, CheckCircle2, User, Search, SortAsc, SortDesc, Eye, EyeOff, Filter } from 'lucide-react';
 import { OrderCard } from './OrderCard';
 import { FilterPanel } from './FilterPanel';
-import { orderService } from '../services/orders';
 
 interface OrderColumnsProps {
   orders: Order[];
   onAssignOrder?: (orderId: string, agentName: string) => void;
   onCompleteTask?: (orderId: string, taskId: string) => void;
-  onUpdateDetails?: (orderId: string, details: { invoiceNumber?: string; note?: string }) => void;
+  onUpdateDetails?: (orderId: string, details: { invoiceNumber?: string; note?: string; priority?: 'low' | 'medium' | 'high' }) => void;
+  onDeleteOrder?: (orderId: string) => void;
   agents?: { name: string }[];
 }
 
@@ -48,6 +48,7 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
   onAssignOrder,
   onCompleteTask,
   onUpdateDetails,
+  onDeleteOrder,
   agents = []
 }) => {
   const [sortBy, setSortBy] = useState<SortOption>('ticket');
@@ -57,7 +58,6 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
   const [showCompleted, setShowCompleted] = useState(false);
   const [filters, setFilters] = useState<FilterState>(initialFilterState);
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
-  const [localOrders, setLocalOrders] = useState<Order[]>(orders);
 
   const toggleSortDirection = () => {
     setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -73,71 +73,28 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
     setExpandedCards(newExpandedCards);
   };
 
-  const handleDeleteOrder = async (orderId: string) => {
-    try {
-      await orderService.deleteOrder(orderId);
-      setLocalOrders(prev => prev.filter(o => o.id !== orderId));
-    } catch (error) {
-      console.error('Failed to delete order:', error);
-    }
-  };
-
-  const handleAssignOrder = async (orderId: string, agentName: string) => {
-    try {
-      setLocalOrders(prev => prev.map(order => 
-        order.id === orderId 
-          ? { ...order, assignedTo: agentName, status: 'in-progress' }
-          : order
-      ));
-      onAssignOrder?.(orderId, agentName);
-    } catch (error) {
-      console.error('Failed to assign order:', error);
-    }
-  };
-
-  const handleCompleteTask = async (orderId: string, taskId: string) => {
-    try {
-      const order = localOrders.find(o => o.id === orderId);
-      if (!order) return;
-
-      const updatedOrder = {
-        ...order,
-        tasks: order.tasks.map(task => 
-          task.id === taskId 
-            ? { ...task, completed: !task.completed, completedAt: !task.completed ? new Date().toISOString() : undefined }
-            : task
-        )
-      };
-
-      const allTasksCompleted = updatedOrder.tasks.every(task => task.completed);
-      if (allTasksCompleted && updatedOrder.status !== 'completed') {
-        updatedOrder.status = 'completed';
-        updatedOrder.completedAt = new Date().toISOString();
-      }
-
-      setLocalOrders(prev => prev.map(o => o.id === orderId ? updatedOrder : o));
-      await orderService.updateOrder(updatedOrder);
-      onCompleteTask?.(orderId, taskId);
-    } catch (error) {
-      console.error('Failed to complete task:', error);
-    }
-  };
-
-  const handleUpdateDetails = async (orderId: string, details: any) => {
-    try {
-      setLocalOrders(prev => prev.map(order => 
-        order.id === orderId 
-          ? { ...order, details: { ...order.details, ...details } }
-          : order
-      ));
-      onUpdateDetails?.(orderId, details);
-    } catch (error) {
-      console.error('Failed to update details:', error);
+  const getTimeInMilliseconds = (timeFrame: string): number => {
+    const now = new Date().getTime();
+    switch (timeFrame) {
+      case '1h': return 60 * 60 * 1000;
+      case '12h': return 12 * 60 * 60 * 1000;
+      case '24h': return 24 * 60 * 60 * 1000;
+      case '3d': return 3 * 24 * 60 * 60 * 1000;
+      case '7d': return 7 * 24 * 60 * 60 * 1000;
+      case '15d': return 15 * 24 * 60 * 60 * 1000;
+      case '30d': return 30 * 24 * 60 * 60 * 1000;
+      case '45d': return 45 * 24 * 60 * 60 * 1000;
+      case '60d': return 60 * 24 * 60 * 60 * 1000;
+      case '6m': return 180 * 24 * 60 * 60 * 1000;
+      case '12m': return 365 * 24 * 60 * 60 * 1000;
+      case '24m': return 730 * 24 * 60 * 60 * 1000;
+      default: return Infinity;
     }
   };
 
   const filteredAndSortedOrders = useMemo(() => {
-    let filtered = localOrders.filter(order => {
+    let filtered = orders.filter(order => {
+      // Basic search filter
       const searchLower = searchTerm.toLowerCase();
       if (searchTerm) {
         switch (searchField) {
@@ -153,12 +110,27 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
         }
       }
 
+      // Advanced filters
       if (filters.customerName && !order.details?.customerName.toLowerCase().includes(filters.customerName.toLowerCase())) {
         return false;
       }
 
       if (filters.assignedTo && order.assignedTo !== filters.assignedTo) {
         return false;
+      }
+
+      if (filters.createdWithin !== 'all') {
+        const timeLimit = getTimeInMilliseconds(filters.createdWithin);
+        const orderTime = new Date(order.createdAt).getTime();
+        const now = new Date().getTime();
+        if (now - orderTime > timeLimit) return false;
+      }
+
+      if (filters.closedAfter && order.completedAt) {
+        const timeLimit = getTimeInMilliseconds(filters.closedAfter);
+        const createdTime = new Date(order.createdAt).getTime();
+        const completedTime = new Date(order.completedAt).getTime();
+        if (completedTime - createdTime > timeLimit) return false;
       }
 
       if (!filters.status.unassigned && order.status === 'unassigned') return false;
@@ -188,7 +160,7 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
       }
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [localOrders, sortBy, sortDirection, searchTerm, searchField, filters]);
+  }, [orders, sortBy, sortDirection, searchTerm, searchField, filters]);
 
   const baseColumns = [
     {
@@ -311,10 +283,26 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
                   <OrderCard
                     key={order.id}
                     order={order}
-                    onAssign={(agentName) => handleAssignOrder(order.id, agentName)}
-                    onCompleteTask={(taskId) => handleCompleteTask(order.id, taskId)}
-                    onUpdateDetails={(details) => handleUpdateDetails(order.id, details)}
-                    onDelete={() => handleDeleteOrder(order.id)}
+                    onAssign={
+                      onAssignOrder 
+                        ? (agentName) => onAssignOrder(order.id, agentName)
+                        : undefined
+                    }
+                    onCompleteTask={
+                      onCompleteTask
+                        ? (taskId) => onCompleteTask(order.id, taskId)
+                        : undefined
+                    }
+                    onUpdateDetails={
+                      onUpdateDetails
+                        ? (details) => onUpdateDetails(order.id, details)
+                        : undefined
+                    }
+                    onDelete={
+                      onDeleteOrder
+                        ? () => onDeleteOrder(order.id)
+                        : undefined
+                    }
                     agents={agents}
                     showChecklist={expandedCards.has(order.id)}
                     onToggleChecklist={() => toggleCardExpansion(order.id)}

@@ -51,13 +51,30 @@ CREATE INDEX idx_orders_assigned_to ON orders(assigned_to);
 CREATE INDEX idx_assignment_history_order_id ON assignment_history(order_id);
 CREATE INDEX idx_agents_department ON agents(department_name);
 
+-- Function to get assignment history
+CREATE OR REPLACE FUNCTION get_assignment_history(p_order_id TEXT)
+RETURNS TABLE (
+  agent_name TEXT,
+  assigned_at TIMESTAMP WITH TIME ZONE
+) 
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT ah.agent_name, ah.assigned_at
+  FROM assignment_history ah
+  WHERE ah.order_id = p_order_id
+  ORDER BY ah.assigned_at DESC;
+END;
+$$;
+
 -- Function to assign order and track history
 CREATE OR REPLACE FUNCTION assign_order(
   p_order_id TEXT,
   p_agent_name TEXT
 ) RETURNS void AS $$
 BEGIN
-  -- Update order
   UPDATE orders
   SET 
     assigned_to = p_agent_name,
@@ -67,11 +84,9 @@ BEGIN
     END
   WHERE id = p_order_id;
 
-  -- Add assignment history
   INSERT INTO assignment_history (order_id, agent_name)
   VALUES (p_order_id, p_agent_name);
 
-  -- Update agent stats
   UPDATE agents
   SET total_orders = total_orders + 1
   WHERE name = p_agent_name
@@ -81,7 +96,7 @@ BEGIN
     AND assigned_at < NOW()
   );
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to complete order and update stats
 CREATE OR REPLACE FUNCTION complete_order(
@@ -90,26 +105,23 @@ CREATE OR REPLACE FUNCTION complete_order(
 DECLARE
   v_agent_name TEXT;
 BEGIN
-  -- Get current agent
   SELECT assigned_to INTO v_agent_name
   FROM orders
   WHERE id = p_order_id;
 
-  -- Update order
   UPDATE orders
   SET 
     status = 'completed',
     completed_at = NOW()
   WHERE id = p_order_id;
 
-  -- Update agent stats if there is an assigned agent
   IF v_agent_name IS NOT NULL THEN
     UPDATE agents
     SET completed_orders = completed_orders + 1
     WHERE name = v_agent_name;
   END IF;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to increment completed orders for an agent
 CREATE OR REPLACE FUNCTION increment_completed_orders(
@@ -120,7 +132,7 @@ BEGIN
   SET completed_orders = completed_orders + 1
   WHERE name = p_agent_name;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to increment total orders for an agent
 CREATE OR REPLACE FUNCTION increment_agent_orders(
@@ -131,36 +143,16 @@ BEGIN
   SET total_orders = total_orders + 1
   WHERE name = p_agent_name;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Function to get assignment history
-CREATE OR REPLACE FUNCTION get_assignment_history(
-  p_order_id TEXT
-) RETURNS TABLE (
-  agent_name TEXT,
-  assigned_at TIMESTAMP WITH TIME ZONE
-) AS $$
-BEGIN
-  RETURN QUERY
-  SELECT ah.agent_name, ah.assigned_at
-  FROM assignment_history ah
-  WHERE ah.order_id = p_order_id
-  ORDER BY ah.assigned_at DESC;
-END;
-$$ LANGUAGE plpgsql;
+-- Grant necessary permissions
+GRANT EXECUTE ON FUNCTION get_assignment_history(TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION assign_order(TEXT, TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION complete_order(TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION increment_completed_orders(TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION increment_agent_orders(TEXT) TO anon, authenticated, service_role;
 
--- Function to add assignment history
-CREATE OR REPLACE FUNCTION add_assignment_history(
-  p_order_id TEXT,
-  p_agent_name TEXT
-) RETURNS void AS $$
-BEGIN
-  INSERT INTO assignment_history (order_id, agent_name)
-  VALUES (p_order_id, p_agent_name);
-END;
-$$ LANGUAGE plpgsql;
-
--- Insert some initial data
+-- Insert initial departments
 INSERT INTO departments (name) VALUES
   ('Management'),
   ('Support'),

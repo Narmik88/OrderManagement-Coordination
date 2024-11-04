@@ -3,7 +3,7 @@ import { DashboardStats } from '../components/DashboardStats';
 import { ActionButtons } from '../components/ActionButtons';
 import { OrderColumns } from '../components/OrderColumns';
 import { Layout } from '../components/Layout';
-import { db } from '../services/supabase';
+import { db, supabase } from '../services/supabase';
 import { orderService } from '../services/orders';
 import { Order, Department } from '../types';
 
@@ -22,7 +22,27 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const subscription = subscribeToOrders();
+    return () => {
+      subscription?.unsubscribe();
+    };
   }, []);
+
+  const subscribeToOrders = () => {
+    return supabase
+      .channel('orders-channel')
+      .on('postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'orders' 
+        }, 
+        async () => {
+          await loadData();
+        }
+      )
+      .subscribe();
+  };
 
   const loadData = async () => {
     try {
@@ -52,11 +72,96 @@ export const DashboardPage: React.FC = () => {
       const createdOrder = await orderService.createOrder(newOrder);
       if (createdOrder) {
         setOrders(prevOrders => [createdOrder, ...prevOrders]);
-        await loadData(); // Reload all data to update stats
+        const statsData = await db.getStats();
+        setStats(statsData);
       }
     } catch (err) {
       console.error('Failed to create order:', err);
       setError('Failed to create order. Please try again.');
+    }
+  };
+
+  const handleAssignOrder = async (orderId: string, agentName: string) => {
+    try {
+      await orderService.assignOrder(orderId, agentName);
+      await loadData();
+    } catch (err) {
+      console.error('Failed to assign order:', err);
+      setError('Failed to assign order. Please try again.');
+    }
+  };
+
+  const handleCompleteTask = async (orderId: string, taskId: string) => {
+    try {
+      const orderToUpdate = orders.find(o => o.id === orderId);
+      if (!orderToUpdate) return;
+
+      const task = orderToUpdate.tasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      const updatedTasks = await orderService.completeTask(orderId, taskId, !task.completed);
+      const allTasksCompleted = updatedTasks.every((task: any) => task.completed);
+
+      // Update the order in state immediately
+      setOrders(prevOrders => prevOrders.map(order => {
+        if (order.id === orderId) {
+          return {
+            ...order,
+            tasks: updatedTasks,
+            status: allTasksCompleted ? 'completed' : 'in-progress',
+            completedAt: allTasksCompleted ? new Date().toISOString() : order.completedAt
+          };
+        }
+        return order;
+      }));
+
+      // Update stats if order is completed
+      if (allTasksCompleted) {
+        const statsData = await db.getStats();
+        setStats(statsData);
+      }
+    } catch (err) {
+      console.error('Failed to update task:', err);
+      setError('Failed to update task. Please try again.');
+    }
+  };
+
+  const handleUpdateDetails = async (orderId: string, details: { invoiceNumber?: string; note?: string; priority?: 'low' | 'medium' | 'high' }) => {
+    try {
+      const orderToUpdate = orders.find(o => o.id === orderId);
+      if (!orderToUpdate) return;
+
+      const updatedOrder: Order = {
+        ...orderToUpdate,
+        details: {
+          ...orderToUpdate.details,
+          invoiceNumber: details.invoiceNumber,
+          note: details.note
+        },
+        priority: details.priority || orderToUpdate.priority
+      };
+
+      await orderService.updateOrder(updatedOrder);
+      
+      // Update order in state immediately
+      setOrders(prevOrders => prevOrders.map(order => 
+        order.id === orderId ? updatedOrder : order
+      ));
+    } catch (err) {
+      console.error('Failed to update order details:', err);
+      setError('Failed to update order details. Please try again.');
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    try {
+      await orderService.deleteOrder(orderId);
+      setOrders(prevOrders => prevOrders.filter(order => order.id !== orderId));
+      const statsData = await db.getStats();
+      setStats(statsData);
+    } catch (err) {
+      console.error('Failed to delete order:', err);
+      setError('Failed to delete order. Please try again.');
     }
   };
 
@@ -124,6 +229,10 @@ export const DashboardPage: React.FC = () => {
         <OrderColumns
           orders={filteredOrders}
           agents={departments.flatMap(dept => dept.agents)}
+          onAssignOrder={handleAssignOrder}
+          onCompleteTask={handleCompleteTask}
+          onUpdateDetails={handleUpdateDetails}
+          onDeleteOrder={handleDeleteOrder}
         />
       </div>
     </Layout>

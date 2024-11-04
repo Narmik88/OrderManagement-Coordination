@@ -64,7 +64,9 @@ export const NewOrderModal: React.FC<Props> = ({ isOpen, onClose, onSubmit, orde
       createdAt: new Date().toISOString(),
       priority: 'medium',
       details,
-      tasks: allTasks
+      tasks: allTasks,
+      assignedTo: undefined,
+      completedAt: undefined
     };
 
     onSubmit(newOrder);

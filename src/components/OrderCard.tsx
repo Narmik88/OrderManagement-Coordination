@@ -13,24 +13,6 @@ interface Props {
   onToggleChecklist?: () => void;
 }
 
-const formatDate = (dateString: string | undefined): string => {
-  if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'N/A';
-    return new Intl.DateTimeFormat('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
-  } catch (error) {
-    console.error('Date formatting error:', error);
-    return 'N/A';
-  }
-};
-
 export const OrderCard: React.FC<Props> = ({ 
   order, 
   onAssign, 
@@ -88,6 +70,17 @@ export const OrderCard: React.FC<Props> = ({
     onUpdateDetails?.({ priority: newPriority });
   };
 
+  const handleTaskComplete = (taskId: string) => {
+    onCompleteTask?.(taskId);
+  };
+
+  const handleAssign = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const agentName = e.target.value;
+    if (agentName && onAssign) {
+      onAssign(agentName);
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
       <div className="flex justify-between items-start mb-2">
@@ -108,12 +101,15 @@ export const OrderCard: React.FC<Props> = ({
               {order.priority}
             </span>
           )}
-          <button
-            onClick={onDelete}
-            className="text-red-600 hover:text-red-700"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {onDelete && (
+            <button
+              onClick={onDelete}
+              className="text-red-600 hover:text-red-700"
+              title="Delete order"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -199,7 +195,7 @@ export const OrderCard: React.FC<Props> = ({
         <div className="mb-4">
           <select
             value={order.assignedTo || ''}
-            onChange={(e) => onAssign?.(e.target.value)}
+            onChange={handleAssign}
             className="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
           >
             <option value="">Assign to agent...</option>
@@ -209,13 +205,6 @@ export const OrderCard: React.FC<Props> = ({
               </option>
             ))}
           </select>
-        </div>
-      )}
-
-      {order.assignedTo && (
-        <div className="mb-4 flex items-center text-sm text-gray-600">
-          <User className="w-4 h-4 mr-1" />
-          <span>Assigned to: {order.assignedTo}</span>
         </div>
       )}
 
@@ -241,9 +230,9 @@ export const OrderCard: React.FC<Props> = ({
             )}
           </button>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-1.5">
+        <div className="w-full bg-gray-200 rounded-full h-2">
           <div
-            className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
+            className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
             style={{ width: `${completionPercentage}%` }}
           />
         </div>
@@ -256,7 +245,7 @@ export const OrderCard: React.FC<Props> = ({
               <input
                 type="checkbox"
                 checked={task.completed}
-                onChange={() => onCompleteTask?.(task.id)}
+                onChange={() => handleTaskComplete(task.id)}
                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
               />
               <span className={`${task.completed ? 'line-through text-gray-500' : 'text-gray-700'}`}>
@@ -264,7 +253,7 @@ export const OrderCard: React.FC<Props> = ({
               </span>
               {task.completed && task.completedAt && (
                 <span className="text-xs text-gray-500">
-                  {formatDate(task.completedAt)}
+                  {new Date(task.completedAt).toLocaleString()}
                 </span>
               )}
             </div>
@@ -272,10 +261,10 @@ export const OrderCard: React.FC<Props> = ({
         </div>
       )}
 
-      <div className="mt-4 text-sm text-gray-500 space-y-1">
-        <p>Created: {formatDate(order.createdAt)}</p>
+      <div className="mt-4 text-sm text-gray-500">
+        <p>Created: {new Date(order.createdAt).toLocaleString()}</p>
         {order.completedAt && (
-          <p>Completed: {formatDate(order.completedAt)}</p>
+          <p>Completed: {new Date(order.completedAt).toLocaleString()}</p>
         )}
       </div>
     </div>

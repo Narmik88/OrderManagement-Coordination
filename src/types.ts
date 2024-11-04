@@ -2,6 +2,8 @@ export interface Agent {
   name: string;
   completedOrders: number;
   totalOrders: number;
+  email?: string;
+  extension?: string;
 }
 
 export interface Department {
@@ -34,11 +36,11 @@ export interface Order {
   title: string;
   type: string;
   status: 'unassigned' | 'in-progress' | 'completed';
-  createdAt: string;
   priority: 'low' | 'medium' | 'high';
   details?: OrderDetails;
   tasks: TaskItem[];
   assignedTo?: string;
+  createdAt: string;
   completedAt?: string;
 }
 

@@ -1,6 +1,5 @@
 import { supabase } from './supabase';
-import type { Order } from '../types';
-import { db } from './database';
+import type { Order, AgentAssignment } from '../types';
 
 export const orderService = {
   async createOrder(order: Omit<Order, 'id'>) {
@@ -23,16 +22,20 @@ export const orderService = {
         .select();
 
       if (error) {
-        console.error('Supabase save failed, using local data:', error);
-        // Fallback to local database
-        const localOrder = {
-          id,
-          ...order,
-          createdAt: new Date().toISOString(),
-          completedAt: null
-        };
-        await db.saveOrder(localOrder);
-        return localOrder;
+        console.error('Database error:', error);
+        throw error;
+      }
+
+      if (order.assignedTo) {
+        await Promise.all([
+          supabase.rpc('increment_agent_orders', {
+            p_agent_name: order.assignedTo
+          }),
+          supabase.rpc('add_assignment_history', {
+            p_order_id: id,
+            p_agent_name: order.assignedTo
+          })
+        ]);
       }
 
       return data?.[0];
@@ -43,78 +46,92 @@ export const orderService = {
   },
 
   async updateOrder(order: Order) {
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .update({
-          title: order.title,
-          type: order.type,
-          status: order.status,
-          priority: order.priority,
-          details: order.details || {},
-          tasks: order.tasks || [],
-          assigned_to: order.assignedTo,
-          completed_at: order.completedAt
-        })
-        .eq('id', order.id)
-        .select();
+    const { data, error } = await supabase
+      .from('orders')
+      .update({
+        title: order.title,
+        type: order.type,
+        status: order.status,
+        priority: order.priority,
+        details: order.details || {},
+        tasks: order.tasks || [],
+        assigned_to: order.assignedTo,
+        completed_at: order.completedAt
+      })
+      .eq('id', order.id)
+      .select();
 
-      if (error) {
-        console.error('Supabase update failed, using local data:', error);
-        // Fallback to local database
-        await db.updateOrder(order);
-        return order;
-      }
-
-      return data?.[0];
-    } catch (error) {
-      console.error('Order update failed:', error);
-      throw error;
-    }
+    if (error) throw error;
+    return data?.[0];
   },
 
   async deleteOrder(id: string) {
-    try {
-      const { error } = await supabase
-        .from('orders')
-        .delete()
-        .eq('id', id);
+    const { error } = await supabase
+      .from('orders')
+      .delete()
+      .eq('id', id);
 
-      if (error) {
-        console.error('Supabase delete failed, using local data:', error);
-        // Fallback to local database
-        await db.deleteOrder(id);
-        return;
-      }
-    } catch (error) {
-      console.error('Order deletion failed:', error);
+    if (error) throw error;
+  },
+
+  async assignOrder(orderId: string, agentName: string) {
+    const { error } = await supabase.rpc('assign_order', {
+      p_order_id: orderId,
+      p_agent_name: agentName
+    });
+
+    if (error) {
+      console.error('Failed to assign order:', error);
       throw error;
     }
   },
 
-  async getAllOrders(): Promise<Order[]> {
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
+  async getAssignmentHistory(orderId: string): Promise<AgentAssignment[]> {
+    const { data, error } = await supabase.rpc('get_assignment_history', {
+      p_order_id: orderId
+    });
 
-      if (error) {
-        console.error('Supabase fetch failed, using local data:', error);
-        // Fallback to local database
-        return await db.getAllOrders();
-      }
+    if (error) throw error;
+    return data.map(({ agent_name, assigned_at }) => ({
+      agentName: agent_name,
+      assignedAt: assigned_at
+    }));
+  },
 
-      return data.map(order => ({
-        ...order,
-        assignedTo: order.assigned_to,
-        createdAt: order.created_at,
-        completedAt: order.completed_at
-      }));
-    } catch (error) {
-      console.error('Failed to fetch orders:', error);
-      // Fallback to local database
-      return await db.getAllOrders();
+  async completeTask(orderId: string, taskId: string, completed: boolean) {
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .select('tasks, assigned_to')
+      .eq('id', orderId)
+      .single();
+
+    if (orderError) throw orderError;
+
+    const updatedTasks = order.tasks.map((task: any) =>
+      task.id === taskId
+        ? { ...task, completed, completedAt: completed ? new Date().toISOString() : null }
+        : task
+    );
+
+    const allTasksCompleted = updatedTasks.every((task: any) => task.completed);
+
+    if (allTasksCompleted && order.assigned_to) {
+      await supabase.rpc('increment_completed_orders', {
+        p_agent_name: order.assigned_to
+      });
     }
+
+    const { error: updateError } = await supabase
+      .from('orders')
+      .update({ 
+        tasks: updatedTasks,
+        status: allTasksCompleted ? 'completed' : 'in-progress',
+        completed_at: allTasksCompleted ? new Date().toISOString() : null
+      })
+      .eq('id', orderId);
+
+    if (updateError) throw updateError;
+
+    return updatedTasks;
   }
 };
