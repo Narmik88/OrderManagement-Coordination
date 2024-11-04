@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Save, X } from 'lucide-react';
 import { Department } from '../../types';
 import { db } from '../../services/supabase';
@@ -7,38 +7,102 @@ export const DepartmentSettings: React.FC = () => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [editingDept, setEditingDept] = useState<string | null>(null);
   const [newDeptName, setNewDeptName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadDepartments();
+  }, []);
+
+  const loadDepartments = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const deps = await db.getAllDepartments();
+      setDepartments(deps);
+    } catch (err) {
+      console.error('Failed to load departments:', err);
+      setError('Failed to load departments. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAddDepartment = async () => {
     if (!newDeptName.trim()) return;
     
-    const newDept: Department = {
-      name: newDeptName,
-      agents: []
-    };
+    try {
+      setError(null);
+      const newDept: Department = {
+        name: newDeptName.trim(),
+        agents: []
+      };
 
-    await db.saveDepartments([...departments, newDept]);
-    setDepartments([...departments, newDept]);
-    setNewDeptName('');
+      await db.saveDepartment(newDept);
+      await loadDepartments();
+      setNewDeptName('');
+    } catch (err) {
+      console.error('Failed to add department:', err);
+      setError('Failed to add department. Please try again.');
+    }
   };
 
   const handleDeleteDepartment = async (deptName: string) => {
-    const updatedDepts = departments.filter(d => d.name !== deptName);
-    await db.saveDepartments(updatedDepts);
-    setDepartments(updatedDepts);
+    try {
+      setError(null);
+      await db.deleteDepartment(deptName);
+      await loadDepartments();
+    } catch (err) {
+      console.error('Failed to delete department:', err);
+      setError('Failed to delete department. Please try again.');
+    }
   };
 
   const handleUpdateDepartment = async (oldName: string, newName: string) => {
-    const updatedDepts = departments.map(dept =>
-      dept.name === oldName ? { ...dept, name: newName } : dept
-    );
-    await db.saveDepartments(updatedDepts);
-    setDepartments(updatedDepts);
-    setEditingDept(null);
+    if (!newName.trim() || oldName === newName) {
+      setEditingDept(null);
+      return;
+    }
+
+    try {
+      setError(null);
+      const dept = departments.find(d => d.name === oldName);
+      if (!dept) return;
+
+      const updatedDept: Department = {
+        ...dept,
+        name: newName.trim()
+      };
+
+      await db.saveDepartment(updatedDept);
+      if (oldName !== newName) {
+        await db.deleteDepartment(oldName);
+      }
+      await loadDepartments();
+      setEditingDept(null);
+    } catch (err) {
+      console.error('Failed to update department:', err);
+      setError('Failed to update department. Please try again.');
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-gray-600">Loading departments...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold">Manage Departments</h2>
+
+      {error && (
+        <div className="bg-red-50 text-red-600 p-3 rounded-lg">
+          {error}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <input
@@ -50,7 +114,8 @@ export const DepartmentSettings: React.FC = () => {
         />
         <button
           onClick={handleAddDepartment}
-          className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+          disabled={!newDeptName.trim()}
+          className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus className="w-5 h-5 mr-2" />
           Add Department

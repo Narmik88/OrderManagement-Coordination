@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Save, X } from 'lucide-react';
 import { ORDER_TYPES, TASK_LISTS } from '../../types';
 import { db } from '../../services/supabase';
@@ -9,29 +9,63 @@ interface Category {
 }
 
 export const CategorySettings: React.FC = () => {
-  const [categories, setCategories] = useState<Category[]>(
-    Object.entries(ORDER_TYPES).map(([_, value]) => ({
-      name: value,
-      tasks: TASK_LISTS[value as keyof typeof TASK_LISTS] || []
-    }))
-  );
+  const [categories, setCategories] = useState<Category[]>([]);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [newCategory, setNewCategory] = useState({ name: '', tasks: [''] });
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  const loadCategories = () => {
+    const initialCategories = Object.entries(ORDER_TYPES).map(([_, value]) => ({
+      name: value,
+      tasks: TASK_LISTS[value as keyof typeof TASK_LISTS] || []
+    }));
+    setCategories(initialCategories);
+  };
 
   const handleAddCategory = async () => {
     if (!newCategory.name.trim()) return;
     
-    const category: Category = {
-      name: newCategory.name,
-      tasks: newCategory.tasks.filter(task => task.trim())
-    };
+    try {
+      const category: Category = {
+        name: newCategory.name,
+        tasks: newCategory.tasks.filter(task => task.trim())
+      };
 
-    setCategories([...categories, category]);
-    setNewCategory({ name: '', tasks: [''] });
+      // Update ORDER_TYPES and TASK_LISTS
+      (ORDER_TYPES as any)[newCategory.name.toUpperCase().replace(/\s+/g, '_')] = newCategory.name;
+      (TASK_LISTS as any)[newCategory.name] = category.tasks;
+
+      setCategories([...categories, category]);
+      setNewCategory({ name: '', tasks: [''] });
+      setError(null);
+    } catch (err) {
+      console.error('Failed to add category:', err);
+      setError('Failed to add category');
+    }
   };
 
   const handleDeleteCategory = async (categoryName: string) => {
-    setCategories(categories.filter(c => c.name !== categoryName));
+    try {
+      setCategories(categories.filter(c => c.name !== categoryName));
+      
+      // Remove from ORDER_TYPES and TASK_LISTS
+      const typeKey = Object.keys(ORDER_TYPES).find(
+        key => (ORDER_TYPES as any)[key] === categoryName
+      );
+      if (typeKey) {
+        delete (ORDER_TYPES as any)[typeKey];
+        delete (TASK_LISTS as any)[categoryName];
+      }
+      
+      setError(null);
+    } catch (err) {
+      console.error('Failed to delete category:', err);
+      setError('Failed to delete category');
+    }
   };
 
   const handleAddTask = (categoryName: string) => {
@@ -51,6 +85,10 @@ export const CategorySettings: React.FC = () => {
       if (category.name === categoryName) {
         const newTasks = [...category.tasks];
         newTasks[taskIndex] = newValue;
+        
+        // Update TASK_LISTS
+        (TASK_LISTS as any)[categoryName] = newTasks;
+        
         return {
           ...category,
           tasks: newTasks
@@ -63,9 +101,14 @@ export const CategorySettings: React.FC = () => {
   const handleDeleteTask = (categoryName: string, taskIndex: number) => {
     setCategories(categories.map(category => {
       if (category.name === categoryName) {
+        const newTasks = category.tasks.filter((_, index) => index !== taskIndex);
+        
+        // Update TASK_LISTS
+        (TASK_LISTS as any)[categoryName] = newTasks;
+        
         return {
           ...category,
-          tasks: category.tasks.filter((_, index) => index !== taskIndex)
+          tasks: newTasks
         };
       }
       return category;
@@ -75,6 +118,12 @@ export const CategorySettings: React.FC = () => {
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold">Manage Categories</h2>
+
+      {error && (
+        <div className="bg-red-50 text-red-600 p-3 rounded-lg">
+          {error}
+        </div>
+      )}
 
       <div className="space-y-4">
         <div className="flex gap-2">
@@ -87,7 +136,8 @@ export const CategorySettings: React.FC = () => {
           />
           <button
             onClick={handleAddCategory}
-            className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            disabled={!newCategory.name.trim()}
+            className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-5 h-5 mr-2" />
             Add Category

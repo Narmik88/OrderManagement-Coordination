@@ -13,14 +13,33 @@ class DatabaseService {
     if (this.initialized) return;
 
     try {
-      // Test connection
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
+      // Create departments table
+      const { error: deptError } = await supabase.from('departments')
+        .select('name')
         .limit(1);
 
-      if (error && error.code !== 'PGRST116') {
-        throw new Error('Failed to connect to Supabase');
+      if (deptError && deptError.message.includes('does not exist')) {
+        const { error } = await supabase.from('departments')
+          .insert([{ name: 'Management' }]);
+        if (error) throw error;
+      }
+
+      // Create agents table
+      const { error: agentsError } = await supabase.from('agents')
+        .select('name')
+        .limit(1);
+
+      if (agentsError && agentsError.message.includes('does not exist')) {
+        const { error } = await supabase.from('agents')
+          .insert([{ 
+            name: 'Admin',
+            department_name: 'Management',
+            email: 'admin@example.com',
+            extension: '100',
+            completed_orders: 0,
+            total_orders: 0
+          }]);
+        if (error) throw error;
       }
 
       this.initialized = true;
@@ -30,79 +49,139 @@ class DatabaseService {
     }
   }
 
-  async getAllOrders(): Promise<Order[]> {
-    const { data, error } = await supabase
-      .from('orders')
-      .select(`
-        *,
-        tasks (*)
-      `)
-      .order('created_at', { ascending: false });
+  async getAllDepartments(): Promise<Department[]> {
+    try {
+      const { data: departments, error: deptError } = await supabase
+        .from('departments')
+        .select('name');
 
-    if (error) throw error;
-    return data || [];
+      if (deptError) throw deptError;
+
+      const { data: agents, error: agentsError } = await supabase
+        .from('agents')
+        .select('*');
+
+      if (agentsError) throw agentsError;
+
+      return (departments || []).map(dept => ({
+        name: dept.name,
+        agents: (agents || [])
+          .filter(agent => agent.department_name === dept.name)
+          .map(agent => ({
+            name: agent.name,
+            email: agent.email || '',
+            extension: agent.extension || '',
+            completedOrders: agent.completed_orders || 0,
+            totalOrders: agent.total_orders || 0
+          }))
+      }));
+    } catch (error) {
+      console.error('Error fetching departments:', error);
+      throw new Error('Failed to fetch departments');
+    }
   }
 
-  async saveOrder(order: Omit<Order, 'id'>): Promise<Order> {
-    const { data, error } = await supabase
-      .from('orders')
-      .insert([order])
-      .select()
-      .single();
+  async getAllOrders(): Promise<Order[]> {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*');
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+      throw new Error('Failed to fetch orders');
+    }
+  }
+
+  async saveOrder(order: Order): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .upsert(order);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error saving order:', error);
+      throw new Error('Failed to save order');
+    }
   }
 
   async updateOrder(order: Order): Promise<void> {
-    const { error } = await supabase
-      .from('orders')
-      .update(order)
-      .eq('id', order.id);
-
-    if (error) throw error;
+    return this.saveOrder(order);
   }
 
-  async getAllDepartments(): Promise<Department[]> {
-    const { data, error } = await supabase
-      .from('departments')
-      .select(`
-        *,
-        agents (*)
-      `)
-      .order('name');
+  async saveDepartment(department: Department): Promise<void> {
+    try {
+      // First, save the department
+      const { error: deptError } = await supabase
+        .from('departments')
+        .upsert({ name: department.name });
 
-    if (error) throw error;
-    return data || [];
+      if (deptError) throw deptError;
+
+      // Then, update agents
+      if (department.agents.length > 0) {
+        const { error: agentsError } = await supabase
+          .from('agents')
+          .upsert(
+            department.agents.map(agent => ({
+              name: agent.name,
+              department_name: department.name,
+              email: agent.email || '',
+              extension: agent.extension || '',
+              completed_orders: agent.completedOrders || 0,
+              total_orders: agent.totalOrders || 0
+            }))
+          );
+
+        if (agentsError) throw agentsError;
+      }
+    } catch (error) {
+      console.error('Error saving department:', error);
+      throw new Error('Failed to save department');
+    }
   }
 
-  async saveDepartments(departments: Department[]): Promise<void> {
-    const { error } = await supabase
-      .from('departments')
-      .upsert(departments, { onConflict: 'name' });
+  async deleteDepartment(departmentName: string): Promise<void> {
+    try {
+      // Delete agents first
+      const { error: agentsError } = await supabase
+        .from('agents')
+        .delete()
+        .eq('department_name', departmentName);
 
-    if (error) throw error;
-  }
+      if (agentsError) throw agentsError;
 
-  async saveStats(stats: DashboardStats): Promise<void> {
-    const { error } = await supabase
-      .from('stats')
-      .upsert([{ ...stats, id: 'current' }], { onConflict: 'id' });
+      // Then delete the department
+      const { error: deptError } = await supabase
+        .from('departments')
+        .delete()
+        .eq('name', departmentName);
 
-    if (error) throw error;
+      if (deptError) throw deptError;
+    } catch (error) {
+      console.error('Error deleting department:', error);
+      throw new Error('Failed to delete department');
+    }
   }
 
   async getStats(): Promise<DashboardStats | null> {
-    const { data, error } = await supabase
-      .from('stats')
-      .select('*')
-      .eq('id', 'current')
-      .single();
-
-    if (error && error.code !== 'PGRST116') throw error;
-    return data;
+    const orders = await this.getAllOrders();
+    return {
+      totalOrders: orders.length,
+      completedOrders: orders.filter(order => order.status === 'completed').length,
+      pendingOrders: orders.filter(order => order.status !== 'completed').length
+    };
   }
 
+  async saveStats(stats: DashboardStats): Promise<void> {
+    // Stats are calculated on-the-fly, no need to save
+    return;
+  }
+
+  // Add subscriptions for real-time updates
   subscribeToOrders(callback: (orders: Order[]) => void): () => void {
     const subscription = supabase
       .channel('orders')
