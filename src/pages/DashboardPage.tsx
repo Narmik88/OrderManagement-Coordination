@@ -4,6 +4,7 @@ import { ActionButtons } from '../components/ActionButtons';
 import { OrderColumns } from '../components/OrderColumns';
 import { Layout } from '../components/Layout';
 import { db } from '../services/supabase';
+import { orderService } from '../services/orders';
 import { Order, Department } from '../types';
 
 export const DashboardPage: React.FC = () => {
@@ -42,6 +43,20 @@ export const DashboardPage: React.FC = () => {
       setError('Failed to load data. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOrderCreate = async (newOrder: Omit<Order, 'id'>) => {
+    try {
+      setError(null);
+      const createdOrder = await orderService.createOrder(newOrder);
+      if (createdOrder) {
+        setOrders(prevOrders => [createdOrder, ...prevOrders]);
+        await loadData(); // Reload all data to update stats
+      }
+    } catch (err) {
+      console.error('Failed to create order:', err);
+      setError('Failed to create order. Please try again.');
     }
   };
 
@@ -103,6 +118,7 @@ export const DashboardPage: React.FC = () => {
         <ActionButtons 
           departments={departments}
           orders={orders}
+          onOrderCreate={handleOrderCreate}
         />
         
         <OrderColumns

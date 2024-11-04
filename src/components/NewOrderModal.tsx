@@ -18,7 +18,6 @@ export const NewOrderModal: React.FC<Props> = ({ isOpen, onClose, onSubmit, orde
   const [customTasks, setCustomTasks] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Reset state when modal is opened with a new order type
   useEffect(() => {
     if (isOpen) {
       setDetails({
@@ -65,7 +64,9 @@ export const NewOrderModal: React.FC<Props> = ({ isOpen, onClose, onSubmit, orde
       createdAt: new Date().toISOString(),
       priority: 'medium',
       details,
-      tasks: allTasks
+      tasks: allTasks,
+      assignedTo: undefined,
+      completedAt: undefined
     };
 
     onSubmit(newOrder);
