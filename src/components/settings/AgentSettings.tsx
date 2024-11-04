@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Save, X } from 'lucide-react';
 import { Department } from '../../types';
+import { agentService } from '../../services/agents';
 import { db } from '../../services/supabase';
 
 interface Agent {
@@ -35,8 +36,8 @@ export const AgentSettings: React.FC = () => {
       const allAgents = deps.flatMap(dept => 
         dept.agents.map(agent => ({
           name: agent.name,
-          email: '',
-          extension: '',
+          email: agent.email || '',
+          extension: agent.extension || '',
           department: dept.name
         }))
       );
@@ -52,23 +53,14 @@ export const AgentSettings: React.FC = () => {
     if (!newAgent.name.trim() || !newAgent.email.trim() || !newAgent.department) return;
 
     try {
-      const updatedDepts = departments.map(dept => {
-        if (dept.name === newAgent.department) {
-          return {
-            ...dept,
-            agents: [...dept.agents, { 
-              name: newAgent.name,
-              completedOrders: 0,
-              totalOrders: 0
-            }]
-          };
-        }
-        return dept;
+      await agentService.createAgent({
+        name: newAgent.name,
+        department_name: newAgent.department,
+        email: newAgent.email,
+        extension: newAgent.extension
       });
 
-      await db.saveDepartments(updatedDepts);
-      setDepartments(updatedDepts);
-      setAgents([...agents, newAgent]);
+      await loadData(); // Reload data to get updated list
       setNewAgent({
         name: '',
         email: '',
@@ -82,24 +74,28 @@ export const AgentSettings: React.FC = () => {
     }
   };
 
-  const handleDeleteAgent = async (agentName: string) => {
+  const handleUpdateAgent = async (agent: Agent) => {
     try {
-      const agent = agents.find(a => a.name === agentName);
-      if (!agent) return;
-
-      const updatedDepts = departments.map(dept => {
-        if (dept.name === agent.department) {
-          return {
-            ...dept,
-            agents: dept.agents.filter(a => a.name !== agentName)
-          };
-        }
-        return dept;
+      await agentService.updateAgent({
+        name: agent.name,
+        department_name: agent.department,
+        email: agent.email,
+        extension: agent.extension
       });
 
-      await db.saveDepartments(updatedDepts);
-      setDepartments(updatedDepts);
-      setAgents(agents.filter(a => a.name !== agentName));
+      await loadData(); // Reload data to get updated list
+      setEditingAgent(null);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to update agent:', err);
+      setError('Failed to update agent');
+    }
+  };
+
+  const handleDeleteAgent = async (agentName: string) => {
+    try {
+      await agentService.deleteAgent(agentName);
+      await loadData(); // Reload data to get updated list
       setError(null);
     } catch (err) {
       console.error('Failed to delete agent:', err);
@@ -165,26 +161,76 @@ export const AgentSettings: React.FC = () => {
       <div className="space-y-4">
         {agents.map((agent) => (
           <div key={agent.name} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-            <div>
-              <h3 className="font-medium">{agent.name}</h3>
-              <p className="text-sm text-gray-600">{agent.email}</p>
-              <p className="text-sm text-gray-600">Ext: {agent.extension}</p>
-              <p className="text-sm text-gray-600">Dept: {agent.department}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setEditingAgent(agent.name)}
-                className="text-indigo-600 hover:text-indigo-700"
-              >
-                <Edit2 className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => handleDeleteAgent(agent.name)}
-                className="text-red-600 hover:text-red-700"
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
-            </div>
+            {editingAgent === agent.name ? (
+              <div className="flex-1 grid grid-cols-2 gap-4">
+                <input
+                  type="email"
+                  value={agent.email}
+                  onChange={(e) => setAgents(agents.map(a => 
+                    a.name === agent.name ? { ...a, email: e.target.value } : a
+                  ))}
+                  className="rounded-lg border border-gray-300 px-4 py-2"
+                />
+                <input
+                  type="text"
+                  value={agent.extension}
+                  onChange={(e) => setAgents(agents.map(a => 
+                    a.name === agent.name ? { ...a, extension: e.target.value } : a
+                  ))}
+                  className="rounded-lg border border-gray-300 px-4 py-2"
+                />
+                <select
+                  value={agent.department}
+                  onChange={(e) => setAgents(agents.map(a => 
+                    a.name === agent.name ? { ...a, department: e.target.value } : a
+                  ))}
+                  className="rounded-lg border border-gray-300 px-4 py-2"
+                >
+                  {departments.map((dept) => (
+                    <option key={dept.name} value={dept.name}>
+                      {dept.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleUpdateAgent(agent)}
+                    className="text-green-600 hover:text-green-700"
+                  >
+                    <Save className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => setEditingAgent(null)}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <h3 className="font-medium">{agent.name}</h3>
+                  <p className="text-sm text-gray-600">{agent.email}</p>
+                  <p className="text-sm text-gray-600">Ext: {agent.extension}</p>
+                  <p className="text-sm text-gray-600">Dept: {agent.department}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setEditingAgent(agent.name)}
+                    className="text-indigo-600 hover:text-indigo-700"
+                  >
+                    <Edit2 className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteAgent(agent.name)}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>
