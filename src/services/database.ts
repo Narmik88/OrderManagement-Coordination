@@ -1,7 +1,7 @@
 import { Order, Department, DashboardStats } from '../types';
 
 const DB_NAME = 'RingOfficeDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Increment version number to handle schema updates
 
 interface DBSchema {
   orders: Order[];
@@ -20,31 +20,52 @@ class DatabaseService {
 
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      // Delete the existing database if version mismatch occurs
+      const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+      
+      deleteRequest.onsuccess = () => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-      request.onerror = () => reject(request.error);
+        request.onerror = () => reject(request.error);
 
-      request.onsuccess = () => {
-        this.db = request.result;
-        resolve();
+        request.onsuccess = () => {
+          this.db = request.result;
+          resolve();
+        };
+
+        request.onupgradeneeded = (event) => {
+          const db = (event.target as IDBOpenDBRequest).result;
+
+          // Create stores with proper indexes
+          if (!db.objectStoreNames.contains('orders')) {
+            const orderStore = db.createObjectStore('orders', { keyPath: 'id' });
+            orderStore.createIndex('status', 'status', { unique: false });
+            orderStore.createIndex('assignedTo', 'assignedTo', { unique: false });
+            orderStore.createIndex('createdAt', 'createdAt', { unique: false });
+          }
+
+          if (!db.objectStoreNames.contains('departments')) {
+            const deptStore = db.createObjectStore('departments', { keyPath: 'name' });
+            deptStore.createIndex('name', 'name', { unique: true });
+          }
+
+          if (!db.objectStoreNames.contains('stats')) {
+            db.createObjectStore('stats', { keyPath: 'id' });
+          }
+
+          if (!db.objectStoreNames.contains('activityLog')) {
+            const logStore = db.createObjectStore('activityLog', { 
+              keyPath: 'id', 
+              autoIncrement: true 
+            });
+            logStore.createIndex('timestamp', 'timestamp', { unique: false });
+            logStore.createIndex('action', 'action', { unique: false });
+          }
+        };
       };
 
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-
-        // Create stores if they don't exist
-        if (!db.objectStoreNames.contains('orders')) {
-          db.createObjectStore('orders', { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains('departments')) {
-          db.createObjectStore('departments', { keyPath: 'name' });
-        }
-        if (!db.objectStoreNames.contains('stats')) {
-          db.createObjectStore('stats', { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains('activityLog')) {
-          db.createObjectStore('activityLog', { keyPath: 'id', autoIncrement: true });
-        }
+      deleteRequest.onerror = () => {
+        reject(new Error('Failed to delete existing database'));
       };
     });
   }
@@ -89,6 +110,12 @@ class DatabaseService {
     await this.logActivity('updateOrder', { orderId: order.id });
   }
 
+  async deleteOrder(id: string): Promise<void> {
+    const store = this.getStore('orders', 'readwrite');
+    await this.promisifyRequest(store.delete(id));
+    await this.logActivity('deleteOrder', { orderId: id });
+  }
+
   async getAllDepartments(): Promise<Department[]> {
     const store = this.getStore('departments');
     return this.promisifyRequest(store.getAll());
@@ -115,6 +142,18 @@ class DatabaseService {
   async getActivityLog(): Promise<DBSchema['activityLog']> {
     const store = this.getStore('activityLog');
     return this.promisifyRequest(store.getAll());
+  }
+
+  async clearDatabase(): Promise<void> {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(DB_NAME);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
   }
 }
 

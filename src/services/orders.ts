@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import type { Order } from '../types';
+import { db } from './database';
 
 export const orderService = {
   async createOrder(order: Omit<Order, 'id'>) {
@@ -22,19 +23,16 @@ export const orderService = {
         .select();
 
       if (error) {
-        console.error('Database error:', error);
-        throw error;
-      }
-
-      // If order is assigned to an agent, update their stats
-      if (order.assignedTo) {
-        const { error: statsError } = await supabase.rpc('increment_agent_orders', {
-          agent_name: order.assignedTo
-        });
-
-        if (statsError) {
-          console.error('Failed to update agent stats:', statsError);
-        }
+        console.error('Supabase save failed, using local data:', error);
+        // Fallback to local database
+        const localOrder = {
+          id,
+          ...order,
+          createdAt: new Date().toISOString(),
+          completedAt: null
+        };
+        await db.saveOrder(localOrder);
+        return localOrder;
       }
 
       return data?.[0];
@@ -45,31 +43,78 @@ export const orderService = {
   },
 
   async updateOrder(order: Order) {
-    const { data, error } = await supabase
-      .from('orders')
-      .update({
-        title: order.title,
-        type: order.type,
-        status: order.status,
-        priority: order.priority,
-        details: order.details || {},
-        tasks: order.tasks || [],
-        assigned_to: order.assignedTo,
-        completed_at: order.completedAt
-      })
-      .eq('id', order.id)
-      .select();
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({
+          title: order.title,
+          type: order.type,
+          status: order.status,
+          priority: order.priority,
+          details: order.details || {},
+          tasks: order.tasks || [],
+          assigned_to: order.assignedTo,
+          completed_at: order.completedAt
+        })
+        .eq('id', order.id)
+        .select();
 
-    if (error) throw error;
-    return data?.[0];
+      if (error) {
+        console.error('Supabase update failed, using local data:', error);
+        // Fallback to local database
+        await db.updateOrder(order);
+        return order;
+      }
+
+      return data?.[0];
+    } catch (error) {
+      console.error('Order update failed:', error);
+      throw error;
+    }
   },
 
   async deleteOrder(id: string) {
-    const { error } = await supabase
-      .from('orders')
-      .delete()
-      .eq('id', id);
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', id);
 
-    if (error) throw error;
+      if (error) {
+        console.error('Supabase delete failed, using local data:', error);
+        // Fallback to local database
+        await db.deleteOrder(id);
+        return;
+      }
+    } catch (error) {
+      console.error('Order deletion failed:', error);
+      throw error;
+    }
+  },
+
+  async getAllOrders(): Promise<Order[]> {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase fetch failed, using local data:', error);
+        // Fallback to local database
+        return await db.getAllOrders();
+      }
+
+      return data.map(order => ({
+        ...order,
+        assignedTo: order.assigned_to,
+        createdAt: order.created_at,
+        completedAt: order.completed_at
+      }));
+    } catch (error) {
+      console.error('Failed to fetch orders:', error);
+      // Fallback to local database
+      return await db.getAllOrders();
+    }
   }
 };

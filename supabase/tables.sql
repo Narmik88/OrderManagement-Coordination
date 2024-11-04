@@ -14,13 +14,3 @@ create table orders (
   constraint valid_status check (status in ('unassigned', 'in-progress', 'completed')),
   constraint valid_priority check (priority in ('low', 'medium', 'high'))
 );
-
--- Create function to increment agent orders
-create or replace function increment_agent_orders(agent_name text)
-returns void as $$
-begin
-  update agents
-  set total_orders = total_orders + 1
-  where name = agent_name;
-end;
-$$ language plpgsql;

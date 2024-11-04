@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { Order } from '../types';
-import { Clock, Loader, CheckCircle2, User, Search, SortAsc, SortDesc, Eye, EyeOff, Filter } from 'lucide-react';
+import { Clock, Loader, CheckCircle2, User, Search, SortAsc, SortDesc, Eye, EyeOff } from 'lucide-react';
 import { OrderCard } from './OrderCard';
 import { FilterPanel } from './FilterPanel';
+import { orderService } from '../services/orders';
 
 interface OrderColumnsProps {
   orders: Order[];
@@ -56,6 +57,7 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
   const [showCompleted, setShowCompleted] = useState(false);
   const [filters, setFilters] = useState<FilterState>(initialFilterState);
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [localOrders, setLocalOrders] = useState<Order[]>(orders);
 
   const toggleSortDirection = () => {
     setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -69,6 +71,60 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
       newExpandedCards.add(orderId);
     }
     setExpandedCards(newExpandedCards);
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    try {
+      await orderService.deleteOrder(orderId);
+      setLocalOrders(prev => prev.filter(o => o.id !== orderId));
+    } catch (error) {
+      console.error('Failed to delete order:', error);
+    }
+  };
+
+  const handleAssignOrder = async (orderId: string, agentName: string) => {
+    try {
+      setLocalOrders(prev => prev.map(order => 
+        order.id === orderId 
+          ? { ...order, assignedTo: agentName, status: 'in-progress' }
+          : order
+      ));
+      onAssignOrder?.(orderId, agentName);
+    } catch (error) {
+      console.error('Failed to assign order:', error);
+    }
+  };
+
+  const handleCompleteTask = async (orderId: string, taskId: string) => {
+    try {
+      setLocalOrders(prev => prev.map(order => {
+        if (order.id === orderId) {
+          const updatedTasks = order.tasks.map(task => 
+            task.id === taskId 
+              ? { ...task, completed: !task.completed, completedAt: !task.completed ? new Date().toISOString() : undefined }
+              : task
+          );
+          return { ...order, tasks: updatedTasks };
+        }
+        return order;
+      }));
+      onCompleteTask?.(orderId, taskId);
+    } catch (error) {
+      console.error('Failed to complete task:', error);
+    }
+  };
+
+  const handleUpdateDetails = async (orderId: string, details: any) => {
+    try {
+      setLocalOrders(prev => prev.map(order => 
+        order.id === orderId 
+          ? { ...order, details: { ...order.details, ...details } }
+          : order
+      ));
+      onUpdateDetails?.(orderId, details);
+    } catch (error) {
+      console.error('Failed to update details:', error);
+    }
   };
 
   const getTimeInMilliseconds = (timeFrame: string): number => {
@@ -91,8 +147,7 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
   };
 
   const filteredAndSortedOrders = useMemo(() => {
-    let filtered = orders.filter(order => {
-      // Basic search filter
+    let filtered = localOrders.filter(order => {
       const searchLower = searchTerm.toLowerCase();
       if (searchTerm) {
         switch (searchField) {
@@ -108,7 +163,6 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
         }
       }
 
-      // Advanced filters
       if (filters.customerName && !order.details?.customerName.toLowerCase().includes(filters.customerName.toLowerCase())) {
         return false;
       }
@@ -158,7 +212,7 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
       }
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [orders, sortBy, sortDirection, searchTerm, searchField, filters]);
+  }, [localOrders, sortBy, sortDirection, searchTerm, searchField, filters]);
 
   const baseColumns = [
     {
@@ -281,21 +335,10 @@ export const OrderColumns: React.FC<OrderColumnsProps> = ({
                   <OrderCard
                     key={order.id}
                     order={order}
-                    onAssign={
-                      onAssignOrder 
-                        ? (agentName) => onAssignOrder(order.id, agentName)
-                        : undefined
-                    }
-                    onCompleteTask={
-                      onCompleteTask
-                        ? (taskId) => onCompleteTask(order.id, taskId)
-                        : undefined
-                    }
-                    onUpdateDetails={
-                      onUpdateDetails
-                        ? (details) => onUpdateDetails(order.id, details)
-                        : undefined
-                    }
+                    onAssign={(agentName) => handleAssignOrder(order.id, agentName)}
+                    onCompleteTask={(taskId) => handleCompleteTask(order.id, taskId)}
+                    onUpdateDetails={(details) => handleUpdateDetails(order.id, details)}
+                    onDelete={() => handleDeleteOrder(order.id)}
                     agents={agents}
                     showChecklist={expandedCards.has(order.id)}
                     onToggleChecklist={() => toggleCardExpansion(order.id)}

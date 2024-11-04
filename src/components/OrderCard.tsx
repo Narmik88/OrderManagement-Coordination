@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Edit2, Save, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { User, Edit2, Save, X, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { Order, TaskItem } from '../types';
 
 interface Props {
@@ -7,16 +7,36 @@ interface Props {
   onAssign?: (agentName: string) => void;
   onCompleteTask?: (taskId: string) => void;
   onUpdateDetails?: (details: { invoiceNumber?: string; note?: string; priority?: 'low' | 'medium' | 'high' }) => void;
+  onDelete?: () => void;
   agents?: { name: string }[];
   showChecklist?: boolean;
   onToggleChecklist?: () => void;
 }
+
+const formatDate = (dateString: string | undefined): string => {
+  if (!dateString) return 'N/A';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(date);
+  } catch (error) {
+    console.error('Date formatting error:', error);
+    return 'Invalid Date';
+  }
+};
 
 export const OrderCard: React.FC<Props> = ({ 
   order, 
   onAssign, 
   onCompleteTask, 
   onUpdateDetails,
+  onDelete,
   agents = [],
   showChecklist = false,
   onToggleChecklist
@@ -72,21 +92,29 @@ export const OrderCard: React.FC<Props> = ({
     <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
       <div className="flex justify-between items-start mb-2">
         <h3 className="font-semibold text-gray-800">{order.title}</h3>
-        {order.status !== 'completed' ? (
-          <select
-            value={priority}
-            onChange={(e) => handlePriorityChange(e.target.value as 'low' | 'medium' | 'high')}
-            className="text-xs px-2 py-1 rounded-full border border-gray-300 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        <div className="flex items-center gap-2">
+          {order.status !== 'completed' ? (
+            <select
+              value={priority}
+              onChange={(e) => handlePriorityChange(e.target.value as 'low' | 'medium' | 'high')}
+              className="text-xs px-2 py-1 rounded-full border border-gray-300 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            >
+              <option value="low" className="bg-green-100 text-green-800">Low</option>
+              <option value="medium" className="bg-yellow-100 text-yellow-800">Medium</option>
+              <option value="high" className="bg-red-100 text-red-800">High</option>
+            </select>
+          ) : (
+            <span className={`text-xs px-2 py-1 rounded-full ${priorityColors[order.priority]}`}>
+              {order.priority}
+            </span>
+          )}
+          <button
+            onClick={onDelete}
+            className="text-red-600 hover:text-red-700"
           >
-            <option value="low" className="bg-green-100 text-green-800">Low</option>
-            <option value="medium" className="bg-yellow-100 text-yellow-800">Medium</option>
-            <option value="high" className="bg-red-100 text-red-800">High</option>
-          </select>
-        ) : (
-          <span className={`text-xs px-2 py-1 rounded-full ${priorityColors[order.priority]}`}>
-            {order.priority}
-          </span>
-        )}
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {order.details && (
@@ -236,7 +264,7 @@ export const OrderCard: React.FC<Props> = ({
               </span>
               {task.completed && task.completedAt && (
                 <span className="text-xs text-gray-500">
-                  {new Date(task.completedAt).toLocaleString()}
+                  {formatDate(task.completedAt)}
                 </span>
               )}
             </div>
@@ -245,9 +273,9 @@ export const OrderCard: React.FC<Props> = ({
       )}
 
       <div className="mt-4 text-sm text-gray-500">
-        <p>Created: {new Date(order.createdAt).toLocaleString()}</p>
+        <p>Created: {formatDate(order.createdAt)}</p>
         {order.completedAt && (
-          <p>Completed: {new Date(order.completedAt).toLocaleString()}</p>
+          <p>Completed: {formatDate(order.completedAt)}</p>
         )}
       </div>
     </div>
